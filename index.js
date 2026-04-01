@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const admin = require('firebase-admin');
 
-// 1. ربط مفتاح الفايربيز (زي ما طلبت بالظبط)
+// 1. ربط ملف الفايربيز الخاص بك
 const serviceAccount = require("./full-mark-giza-firebase-adminsdk-fbsvc-d3b5aa294c.json");
 
 if (!admin.apps.length) {
@@ -11,8 +11,8 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-// التوكن الجديد بتاعك
-const bot = new Telegraf('8515120154:AAEZNstK27Rr5j_X7vYkXRyfHipqK7pZ1Ec');
+// التوكن الجديد من BotFather
+const bot = new Telegraf('8296071930:AAGtL5Lr_zCc3DlKToMpRHc0citP7CX2x2s');
 
 // الـ ID الخاص بك
 const OWNER_ID = 6188310641; 
@@ -26,7 +26,6 @@ async function isAuthorized(userId) {
     return doc.exists;
 }
 
-// دالة إنشاء القائمة الرئيسية
 const getMainKeyboard = async (userId) => {
     let buttons = [
         [Markup.button.callback('✨ تفعيل طالب جديد', 'ask_name_month'), Markup.button.callback('🔄 تجديد الاشتراك', 'renew_init')],
@@ -39,21 +38,15 @@ const getMainKeyboard = async (userId) => {
     return Markup.inlineKeyboard(buttons);
 };
 
-// إعداد زرار "Menu" أو الـ "Start"
-bot.telegram.setMyCommands([
-    { command: 'start', description: '🚀 يلا بينا ابدأ التشغيل' }
-]);
+bot.telegram.setMyCommands([{ command: 'start', description: '🚀 ابدأ التشغيل' }]);
 
-// --- القائمة الرئيسية ---
 bot.start(async (ctx) => {
     const userId = ctx.from.id;
     if (!(await isAuthorized(userId))) return ctx.reply("⚠️ غير مصرح لك.");
-
     const keyboard = await getMainKeyboard(userId);
-    ctx.reply(`✨ مـرحـبـاً بـك فـي لـوحـة تـحـكـم Full Mark 🚀\n\nاختر العملية المطلوبة من الأسفل:`, keyboard);
+    ctx.reply(`✨ مـرحـبـاً بـك فـي لـوحـة تـحـكـم Full Mark 🚀\n\nاختر العملية المطلوبة:`, keyboard);
 });
 
-// زرار الرجوع للقائمة الرئيسية (متظبط كعنصر مش مصفوفة عشان يشتغل صح مع Markup)
 const backButton = Markup.button.callback('🔙 الرجوع للقائمة الرئيسية', 'main_menu');
 
 bot.action('main_menu', async (ctx) => {
@@ -63,15 +56,14 @@ bot.action('main_menu', async (ctx) => {
     delete userState[userId];
 });
 
-// --- تعديل الردود لإضافة زرار الرجوع ---
 bot.action('ask_name_month', (ctx) => {
     userState[ctx.from.id] = { step: 'waiting_for_name', type: 'monthly' };
-    ctx.reply('\n✍️ ابـعث "اسـم الطـالب" الجديد:\n\n', Markup.inlineKeyboard([[backButton]]));
+    ctx.reply('\n✍️ ابـعث "اسـم الطـالب" الجديد:', Markup.inlineKeyboard([[backButton]]));
 });
 
 bot.action('ask_name_trial', (ctx) => {
     userState[ctx.from.id] = { step: 'waiting_for_name', type: 'trial' };
-    ctx.reply('\n✍️ ابـعث "اسـم الطـالب" للتجربة المجانية:\n\n', Markup.inlineKeyboard([[backButton]]));
+    ctx.reply('\n✍️ ابـعث "اسـم الطـالب" للتجربة المجانية:', Markup.inlineKeyboard([[backButton]]));
 });
 
 bot.action('add_admin_init', (ctx) => {
@@ -80,25 +72,17 @@ bot.action('add_admin_init', (ctx) => {
     ctx.reply('\n👤 ابعت الـ ID الخاص بالموظف الجديد:', Markup.inlineKeyboard([[backButton]]));
 });
 
-// --- سد ثغرات الأزرار التانية عشان البوت ميهنجش ---
-bot.action(['renew_init', 'reset_device_init', 'edit_student_init', 'view_info_init'], (ctx) => {
-    ctx.reply('⚠️ هذه الميزة سيتم تفعيلها قريباً.', Markup.inlineKeyboard([[backButton]]));
-});
-
-// --- استقبال النصوص ---
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const state = userState[userId];
     if (!state) return;
-
     const text = ctx.text;
 
     if (state.step === 'waiting_for_admin_id' && userId === OWNER_ID) {
         await db.collection('admins').doc(text).set({ addedBy: OWNER_ID, createdAt: admin.firestore.FieldValue.serverTimestamp() });
         ctx.reply('✅ تم إضافة الموظف بنجاح.', Markup.inlineKeyboard([[backButton]]));
         delete userState[userId];
-    }
-    else if (state.step === 'waiting_for_name') {
+    } else if (state.step === 'waiting_for_name') {
         userState[userId].studentName = text;
         userState[userId].step = 'waiting_for_major';
         ctx.reply(`\nتـم تسجيل الاسم: ${text}\n\nاخـتار شـعبة الطـالـب:`, 
@@ -111,7 +95,6 @@ bot.on('text', async (ctx) => {
     }
 });
 
-// --- معالجة أزرار الشعبة ---
 const mKeys = { 'major_adabi': 'أدبي', 'major_oloom': 'علمي علوم', 'major_رياضة': 'علمي رياضة' };
 Object.keys(mKeys).forEach(k => {
     bot.action(k, async (ctx) => {
@@ -120,25 +103,24 @@ Object.keys(mKeys).forEach(k => {
         const code = generateCode();
         const data = { code, studentName: s.studentName, major: mKeys[k], type: s.type, isUsed: false, deviceId: null, createdAt: admin.firestore.FieldValue.serverTimestamp() };
         await db.collection('student_codes').doc(code).set(data);
-        
-        // إرسال الريسيت
-        const title = s.type === 'trial' ? 'خلاص! اتعملت التجربة المجانية بنجاح' : 'خلاص! تم تفعيل اشتراك الشهر بنجاح';
-        const message = `✅ ${title}\n\n━━━━━━━━━━━━━━━━━━━━\n👤 **الاسم:** ${data.studentName}\n📖 **الشعبة:** ${data.major}\n🎫 **الكود:** \`${data.code}\`\n━━━━━━━━━━━━━━━━━━━━`;
-        
+        const title = s.type === 'trial' ? 'تم إنشاء كود التجربة' : 'تم تفعيل الاشتراك';
+        const message = `✅ ${title}\n\n👤 **الاسم:** ${data.studentName}\n📖 **الشعبة:** ${data.major}\n🎫 **الكود:** \`${data.code}\``;
         ctx.replyWithMarkdown(message, Markup.inlineKeyboard([[backButton]]));
         delete userState[ctx.from.id];
     });
 });
 
-// --- تصدير الكود ليعمل كسيرفر على Vercel بدون توقف ---
+bot.action(['renew_init', 'reset_device_init', 'edit_student_init', 'view_info_init'], (ctx) => {
+    ctx.reply('⚠️ هذه الميزة قيد التطوير.', Markup.inlineKeyboard([[backButton]]));
+});
+
+// إعداد التصدير لـ Vercel
 module.exports = async (req, res) => {
-    try {
-        if (req.method === 'POST') {
-            await bot.handleUpdate(req.body);
-        }
-        res.status(200).send('Bot is Running Successfully!');
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Error in Bot Update');
+    if (req.method === 'POST') {
+        await bot.handleUpdate(req.body);
+        res.status(200).send('OK');
+    } else {
+        res.status(200).send('Bot is Online!');
     }
 };
+        
