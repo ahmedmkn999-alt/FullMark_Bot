@@ -5,55 +5,43 @@ from firebase_admin import credentials, firestore
 from flask import Flask, request
 import os
 
-# 1. إعداد الفايربيز
+# إعداد الفايربيز
 cred = credentials.Certificate("./full-mark-giza-firebase-adminsdk-fbsvc-d3b5aa294c.json")
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# 2. إعداد البوت والـ Flask
+# إعداد البوت والـ Flask
 TOKEN = '8296071930:AAGtL5Lr_zCc3DlKToMpRHc0citP7CX2x2s'
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
-OWNER_ID = 6188310641 # الـ ID بتاعك
+OWNER_ID = 6188310641
 user_state = {}
 
-# --- دالة التحقق من الرتبة ---
 def get_user_role(user_id):
     if user_id == OWNER_ID: return "owner"
-    admin_doc = db.collection('admins').document(str(user_id)).get()
-    if admin_doc.exists: return "admin"
-    staff_doc = db.collection('staff').document(str(user_id)).get()
-    if staff_doc.exists: return "staff"
+    if db.collection('admins').document(str(user_id)).get().exists: return "admin"
+    if db.collection('staff').document(str(user_id)).get().exists: return "staff"
     return None
 
-# --- الكيبورد الرئيسي (حسب الصورة) ---
 def main_keyboard(user_id):
     role = get_user_role(user_id)
     markup = types.InlineKeyboardMarkup(row_width=2)
+    # أزرار العمليات الأساسية
+    buttons = [
+        types.InlineKeyboardButton("✨ تفعيل طالب", callback_data="act_std"),
+        types.InlineKeyboardButton("🔄 تجديد", callback_data="renew"),
+        types.InlineKeyboardButton("📱 تغيير جهاز", callback_data="chg_dev"),
+        types.InlineKeyboardButton("🆓 تجربة", callback_data="trial")
+    ]
+    markup.add(*buttons)
     
-    # أزرار الموظفين والأدمن
-    btn1 = types.InlineKeyboardButton("✨ تفعيل طالب جديد", callback_data="activate_student")
-    btn2 = types.InlineKeyboardButton("🔄 تجديد الاشتراك", callback_data="renew_sub")
-    btn3 = types.InlineKeyboardButton("📱 تغيير الجهاز", callback_data="change_device")
-    btn4 = types.InlineKeyboardButton("🆓 تجربة ساعة", callback_data="free_trial")
-    btn5 = types.InlineKeyboardButton("👀 كل الطلاب", callback_data="all_students")
-    btn6 = types.InlineKeyboardButton("🔍 بحث عن طالب", callback_data="search_student")
-    
-    markup.add(btn1, btn2)
-    markup.add(btn3, btn4)
-    markup.add(btn5, btn6)
-
-    # أزرار للأدمن والـ Owner فقط
     if role in ["owner", "admin"]:
-        markup.add(types.InlineKeyboardButton("💰 كشف الحساب", callback_data="account_report"),
-                   types.InlineKeyboardButton("🚫 حظر / فك حظر", callback_data="block_unblock"))
-        markup.add(types.InlineKeyboardButton("📊 إحصائيات", callback_data="stats"))
-
-    # أزرار للـ Owner فقط
+        markup.add(types.InlineKeyboardButton("📊 إحصائيات الموظفين", callback_data="view_stats"))
+    
     if role == "owner":
-        markup.add(types.InlineKeyboardButton("➕ إضافة (أدمن/موظف)", callback_data="add_member_init"))
+        markup.add(types.InlineKeyboardButton("➕ إضافة (أدمن/موظف)", callback_data="add_mem"))
     
     return markup
 
@@ -61,76 +49,70 @@ def main_keyboard(user_id):
 def start(message):
     role = get_user_role(message.from_user.id)
     if not role:
-        bot.reply_to(message, "⚠️ عذراً، أنت غير مسجل في النظام.")
+        bot.reply_to(message, "⚠️ الدخول للمصرح لهم فقط.")
         return
-    # حفظ اليوزرنيم في قاعدة البيانات لتسهيل الإضافة لاحقاً
-    db.collection('users_map').document(message.from_user.username.lower() if message.from_user.username else "none").set({
-        'user_id': message.from_user.id,
-        'username': message.from_user.username
-    })
-    bot.send_message(message.chat.id, f"أهلاً بك في لوحة تحكم Full Mark\nرتبتك: {role}", reply_markup=main_keyboard(message.from_user.id))
+    # تسجيل اليوزرنيم لسهولة الإضافة لاحقاً
+    if message.from_user.username:
+        db.collection('users_map').document(message.from_user.username.lower()).set({
+            'user_id': message.from_user.id,
+            'username': message.from_user.username
+        })
+    bot.send_message(message.chat.id, f"🚀 لوحة تحكم Full Mark\nالرتبة: {role}", reply_markup=main_keyboard(message.from_user.id))
 
-# --- منطق الإضافة بالـ Username ---
-@bot.callback_query_handler(func=lambda call: call.data == "add_member_init")
-def add_member_start(call):
-    user_state[call.from_user.id] = {'step': 'wait_member_username'}
-    bot.edit_message_text("ارسل الـ Username الخاص بالشخص (بدون @):", call.message.chat.id, call.message.message_id)
+# --- إضافة عضو جديد باليوزرنيم ---
+@bot.callback_query_handler(func=lambda call: call.data == "add_mem")
+def add_mem_step1(call):
+    user_state[call.from_user.id] = {'step': 'wait_username'}
+    bot.edit_message_text("ارسل يوزرنيم الشخص (بدون @):", call.message.chat.id, call.message.message_id)
 
-@bot.message_handler(func=lambda m: user_state.get(m.from_user.id, {}).get('step') == 'wait_member_username')
-def process_username(message):
-    target_username = message.text.lower().replace("@", "")
-    # البحث عن الـ ID من خلال اليوزرنيم (لازم الشخص يكون كلم البوت مرة قبل كدة)
-    user_data = db.collection('users_map').document(target_username).get()
+@bot.message_handler(func=lambda m: user_state.get(m.from_user.id, {}).get('step') == 'wait_username')
+def add_mem_step2(message):
+    target_un = message.text.lower().replace("@", "")
+    user_data = db.collection('users_map').document(target_un).get()
     
     if not user_data.exists:
-        bot.reply_to(message, "❌ لم أجد هذا المستخدم. اطلب منه أن يرسل /start للبوت أولاً.")
+        bot.reply_to(message, "❌ المستخدم لم يقم بتفعيل البوت (ارسل له رابط البوت ليضغط start أولاً).")
         return
 
     target_id = user_data.to_dict()['user_id']
-    user_state[message.from_user.id] = {'step': 'wait_member_role', 'target_id': target_id, 'target_user': target_username}
+    user_state[message.from_user.id] = {'step': 'wait_role', 't_id': target_id, 't_un': target_un}
     
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("مدير (Admin)", callback_data="role_admin"),
-               types.InlineKeyboardButton("موظف (Staff)", callback_data="role_staff"))
-    bot.send_message(message.chat.id, f"تم العثور على {target_username}. اختر الرتبة:", reply_markup=markup)
+    markup = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("أدمن", callback_data="set_admin"),
+        types.InlineKeyboardButton("موظف", callback_data="set_staff")
+    )
+    bot.send_message(message.chat.id, f"تم العثور على @{target_un}. اختر الرتبة:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("role_"))
-def finalize_role(call):
+@bot.callback_query_handler(func=lambda call: call.data in ["set_admin", "set_staff"])
+def add_mem_final(call):
     state = user_state.get(call.from_user.id)
-    role_type = "admins" if "admin" in call.data else "staff"
-    
-    db.collection(role_type).document(str(state['target_id'])).set({
-        'username': state['target_user'],
-        'codes_count': 0,
-        'added_by': call.from_user.id
+    col = "admins" if "admin" in call.data else "staff"
+    db.collection(col).document(str(state['t_id'])).set({
+        'username': state['t_un'],
+        'codes_count': 0
     })
-    bot.edit_message_text(f"✅ تمت إضافة {state['target_user']} بنجاح كـ {role_type[:-1]}!", call.message.chat.id, call.message.message_id)
+    bot.edit_message_text(f"✅ تمت إضافة @{state['t_un']} بنجاح!", call.message.chat.id, call.message.message_id)
     user_state.pop(call.from_user.id)
 
-# --- تتبع الأكواد في الإحصائيات ---
-@bot.callback_query_handler(func=lambda call: call.data == "stats")
+# --- عرض الإحصائيات ---
+@bot.callback_query_handler(func=lambda call: call.data == "view_stats")
 def show_stats(call):
-    staff_members = db.collection('staff').stream()
-    report = "📊 إنتاجية الموظفين:\n"
-    for member in staff_members:
-        data = member.to_dict()
-        report += f"👤 @{data.get('username')}: {data.get('codes_count', 0)} كود\n"
-    
-    back = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 رجوع", callback_data="main_menu"))
-    bot.edit_message_text(report, call.message.chat.id, call.message.message_id, reply_markup=back)
+    staff = db.collection('staff').stream()
+    msg = "📊 إنتاجية الموظفين:\n"
+    for s in staff:
+        d = s.to_dict()
+        msg += f"👤 @{d.get('username')}: {d.get('codes_count', 0)} كود\n"
+    bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=main_keyboard(call.from_user.id))
 
-# --- تفعيل الطالب (مثال لتحديث العداد) ---
-@bot.callback_query_handler(func=lambda call: call.data == "activate_student")
-def activate_logic(call):
-    # بعد إتمام عملية التفعيل بنجاح، نحدث عداد الموظف
-    role = get_user_role(call.from_user.id)
-    if role == "staff":
-        staff_ref = db.collection('staff').document(str(call.from_user.id))
-        staff_ref.update({'codes_count': firestore.Increment(1)})
-    
-    bot.answer_callback_query(call.id, "جاري تفعيل الطالب...")
+# --- تتبع الأكواد ---
+@bot.callback_query_handler(func=lambda call: call.data == "act_std")
+def track_code(call):
+    # مثال: عند ضغط الموظف على تفعيل طالب، يزيد عداده
+    if get_user_role(call.from_user.id) == "staff":
+        db.collection('staff').document(str(call.from_user.id)).update({'codes_count': firestore.Increment(1)})
+    bot.answer_callback_query(call.id, "جاري التفعيل...")
 
-# --- مسار الـ Webhook (مهم جداً لفيرسال) ---
+# --- جزء الـ Webhook الضروري لـ Vercel ---
 @app.route('/' + TOKEN, methods=['POST'])
 def getMessage():
     json_string = request.get_data().decode('utf-8')
@@ -140,7 +122,6 @@ def getMessage():
 
 @app.route("/")
 def webhook():
-    bot.remove_webhook()
-    # هنا تحط رابط المشروع بتاعك بعد الرفـع
-    # bot.set_webhook(url="https://your-project.vercel.app/" + TOKEN)
-    return "Full Mark Bot is Running!", 200
+    # هذا الرابط سيظهر لك حالة البوت عند فتحه في المتصفح
+    return "Full Mark Bot is Online!", 200
+    
