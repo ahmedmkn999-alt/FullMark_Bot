@@ -1,3 +1,0 @@
-pyTelegramBotAPI
-pyrebase4
-Flask
