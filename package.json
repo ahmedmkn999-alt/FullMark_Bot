@@ -1,0 +1,8 @@
+{
+  "name": "fullmark-bots",
+  "version": "1.0.0",
+  "dependencies": {
+    "telegraf": "^4.15.0",
+    "firebase-admin": "^11.0.0"
+  }
+}
