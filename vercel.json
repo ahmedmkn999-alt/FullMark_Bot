@@ -1,6 +1,5 @@
 {
-  "rewrites": [
-    { "source": "/api/admin", "destination": "/api/index" },
-    { "source": "/api/faq",   "destination": "/api/faq"   }
-  ]
+  "functions": {
+    "api/faq.js": { "runtime": "nodejs20.x" }
+  }
 }
